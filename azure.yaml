@@ -12,5 +12,5 @@ services:
     language: python
     project: src/agent
     docker:
-      path: src/agent/Dockerfile
-      context: src/agent
+      path: ./Dockerfile
+      context: .

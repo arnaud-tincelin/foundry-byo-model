@@ -11,6 +11,7 @@ using './main.bicep'
 //     --template-file infra/main.bicep \
 //     --parameters infra/main.bicepparam
 
-param apimPublisherEmail = 'admin@example.com'
+// Set via: azd env set APIM_PUBLISHER_EMAIL you@example.com
+param apimPublisherEmail = readEnvironmentVariable('APIM_PUBLISHER_EMAIL', 'admin@contoso.com')
 param modelName = 'microsoft/Phi-4-mini-instruct'
 param gpuWorkloadProfileType = 'NC24-A100'

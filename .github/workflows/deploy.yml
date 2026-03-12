@@ -42,11 +42,10 @@ jobs:
       # ---------------------------------------------------------------
       - name: Log in with Azure (federated credentials)
         run: |
-          azd auth login `
-            --client-id "${{ secrets.AZURE_CLIENT_ID }}" `
-            --federated-credential-provider "github" `
+          azd auth login \
+            --client-id "${{ secrets.AZURE_CLIENT_ID }}" \
+            --federated-credential-provider "github" \
             --tenant-id "${{ secrets.AZURE_TENANT_ID }}"
-        shell: pwsh
 
       # ---------------------------------------------------------------
       # 4. Provision infrastructure + deploy services

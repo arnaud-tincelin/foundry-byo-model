@@ -199,6 +199,8 @@ resource modelApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
           args: [
             '--model'
             modelName
+            '--served-model-name'
+            gatewayModelName
             '--port'
             '8000'
             '--trust-remote-code'
@@ -233,15 +235,26 @@ resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' = {
   }
 }
 
+// APIM backend pointing to the vLLM model container app (with /v1 base path)
+resource apimBackend 'Microsoft.ApiManagement/service/backends@2024-06-01-preview' = {
+  parent: apim
+  name: 'vllm-backend'
+  properties: {
+    description: 'vLLM model backend'
+    url: 'https://${modelApp.properties.configuration.ingress.fqdn}/v1'
+    protocol: 'http'
+  }
+}
+
+// Azure OpenAI compatible API with wildcard operations that rewrite paths to vLLM format
+// Foundry sends: /openai/deployments/{name}/chat/completions → vLLM expects: /v1/chat/completions
 resource apimApi 'Microsoft.ApiManagement/service/apis@2024-06-01-preview' = {
   parent: apim
   name: 'model-gateway'
   properties: {
-    displayName: 'Model Gateway'
-    description: 'OpenAI-compatible model gateway backed by custom vLLM model'
+    displayName: 'Model Gateway API'
     path: 'openai'
     protocols: [ 'https' ]
-    serviceUrl: 'https://${modelApp.properties.configuration.ingress.fqdn}'
     subscriptionRequired: true
     subscriptionKeyParameterNames: {
       header: 'api-key'
@@ -250,102 +263,118 @@ resource apimApi 'Microsoft.ApiManagement/service/apis@2024-06-01-preview' = {
   }
 }
 
-// API-level policy to rewrite model name and cap max_tokens for all chat requests
+// Operation: POST /deployments/{deployment-id}/chat/completions → /v1/chat/completions
+resource apimOpChatCompletions 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
+  parent: apimApi
+  name: 'chat-completions'
+  properties: {
+    displayName: 'Chat Completions'
+    method: 'POST'
+    urlTemplate: '/deployments/{deployment-id}/chat/completions'
+    templateParameters: [
+      {
+        name: 'deployment-id'
+        required: true
+        type: 'string'
+      }
+    ]
+  }
+}
+
+resource apimOpChatCompletionsPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
+  parent: apimOpChatCompletions
+  name: 'policy'
+  properties: {
+    format: 'xml'
+    value: '<policies><inbound><base /><rewrite-uri template="/chat/completions" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+  }
+}
+
+// Operation: GET /deployments/{deployment-id}/models → /v1/models
+resource apimOpModels 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
+  parent: apimApi
+  name: 'list-models'
+  properties: {
+    displayName: 'List Models'
+    method: 'GET'
+    urlTemplate: '/deployments/{deployment-id}/models'
+    templateParameters: [
+      {
+        name: 'deployment-id'
+        required: true
+        type: 'string'
+      }
+    ]
+  }
+}
+
+resource apimOpModelsPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
+  parent: apimOpModels
+  name: 'policy'
+  properties: {
+    format: 'xml'
+    value: '<policies><inbound><base /><rewrite-uri template="/models" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+  }
+}
+
+// Operation: POST /deployments/{deployment-id}/completions → /v1/completions
+resource apimOpCompletions 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
+  parent: apimApi
+  name: 'completions'
+  properties: {
+    displayName: 'Completions'
+    method: 'POST'
+    urlTemplate: '/deployments/{deployment-id}/completions'
+    templateParameters: [
+      {
+        name: 'deployment-id'
+        required: true
+        type: 'string'
+      }
+    ]
+  }
+}
+
+resource apimOpCompletionsPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
+  parent: apimOpCompletions
+  name: 'policy'
+  properties: {
+    format: 'xml'
+    value: '<policies><inbound><base /><rewrite-uri template="/completions" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+  }
+}
+
+// Operation: GET /models → /v1/models (direct, no deployment prefix)
+resource apimOpModelsRoot 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
+  parent: apimApi
+  name: 'list-models-root'
+  properties: {
+    displayName: 'List Models (root)'
+    method: 'GET'
+    urlTemplate: '/models'
+  }
+}
+
+resource apimOpModelsRootPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
+  parent: apimOpModelsRoot
+  name: 'policy'
+  properties: {
+    format: 'xml'
+    value: '<policies><inbound><base /><rewrite-uri template="/models" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+  }
+}
+
+// API-level policy: set backend, strip api-version, cap max_tokens
 resource apimApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-preview' = {
   parent: apimApi
   name: 'policy'
   properties: {
     format: 'xml'
-    value: '<policies><inbound><base /><choose><when condition="@(context.Request.Method == &quot;POST&quot;)"><set-body>@{var body = context.Request.Body.As&lt;JObject&gt;(); body["model"] = "${modelName}"; if(body["max_tokens"] == null || (int)body["max_tokens"] &gt; 512) { body["max_tokens"] = 512; } return body.ToString();}</set-body></when></choose></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+    value: '<policies><inbound><base /><set-backend-service backend-id="${apimBackend.name}" /><set-query-parameter name="api-version" exists-action="delete" /><choose><when condition="@(context.Request.Method == &quot;POST&quot;)"><set-body>@{var body = context.Request.Body.As&lt;JObject&gt;(); if(body["max_tokens"] == null || (int)body["max_tokens"] &gt; 512) { body["max_tokens"] = 512; } return body.ToString();}</set-body></when></choose></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
   }
 }
 
-resource apimChatOperation 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
-  parent: apimApi
-  name: 'chat-completions'
-  properties: {
-    displayName: 'Chat Completions'
-    description: 'Send a chat completion request to the model'
-    method: 'POST'
-    urlTemplate: '/deployments/{deploymentName}/chat/completions'
-    templateParameters: [
-      {
-        name: 'deploymentName'
-        type: 'string'
-        required: true
-      }
-    ]
-  }
-}
-
-resource apimListDeployments 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
-  parent: apimApi
-  name: 'list-deployments'
-  properties: {
-    displayName: 'List Deployments'
-    description: 'List available model deployments'
-    method: 'GET'
-    urlTemplate: '/deployments'
-  }
-}
-
-resource apimGetDeployment 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
-  parent: apimApi
-  name: 'get-deployment'
-  properties: {
-    displayName: 'Get Deployment'
-    description: 'Get a specific model deployment'
-    method: 'GET'
-    urlTemplate: '/deployments/{deploymentName}'
-    templateParameters: [
-      {
-        name: 'deploymentName'
-        type: 'string'
-        required: true
-      }
-    ]
-  }
-}
-
-resource apimHealthOperation 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
-  parent: apimApi
-  name: 'health'
-  properties: {
-    displayName: 'Health Check'
-    method: 'GET'
-    urlTemplate: '/health'
-  }
-}
-
-// APIM policies: rewrite deployment paths to the vLLM backend
-resource apimChatPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
-  parent: apimChatOperation
-  name: 'policy'
-  properties: {
-    format: 'xml'
-    value: '<policies><inbound><base /><rewrite-uri template="/v1/chat/completions" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
-  }
-}
-
-resource apimListDeploymentsPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
-  parent: apimListDeployments
-  name: 'policy'
-  properties: {
-    format: 'xml'
-    value: '<policies><inbound><base /><return-response><set-status code="200" reason="OK" /><set-header name="Content-Type" exists-action="override"><value>application/json</value></set-header><set-body>{"data": [{"id": "${gatewayModelName}", "object": "deployment", "model": "${gatewayModelName}"}]}</set-body></return-response></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
-  }
-}
-
-resource apimGetDeploymentPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
-  parent: apimGetDeployment
-  name: 'policy'
-  properties: {
-    format: 'xml'
-    value: '<policies><inbound><base /><return-response><set-status code="200" reason="OK" /><set-header name="Content-Type" exists-action="override"><value>application/json</value></set-header><set-body>{"id": "${gatewayModelName}", "object": "deployment", "model": "${gatewayModelName}"}</set-body></return-response></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
-  }
-}
-
-// APIM subscription for the model gateway API
+// APIM subscription for the API
 resource apimSubscription 'Microsoft.ApiManagement/service/subscriptions@2024-06-01-preview' = {
   parent: apim
   name: 'model-gateway-sub'

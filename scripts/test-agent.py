@@ -7,7 +7,7 @@
 #     "openai",
 # ]
 # ///
-"""Test the Guess My Number agent by sending messages through the Foundry Responses API.
+"""Interactive conversation with the Guess My Number agent via Foundry Responses API.
 
 Usage:
     export AI_SERVICES_ENDPOINT="https://<your-ai-services>.cognitiveservices.azure.com/"
@@ -49,34 +49,32 @@ def main():
 
     agent_ref = {"agent_reference": {"name": AGENT_NAME, "type": "agent_reference"}}
 
-    # Turn 1: greet the agent
-    print("--- Sending: 'Hi! Let's play!' ---")
-    r1 = openai_client.responses.create(
-        model=agent_model,
-        input="Hi! Let's play!",
-        extra_body=agent_ref,
-    )
-    print(f"Agent: {r1.output_text}\n")
+    print("🎮 Guess My Number — Chat with the agent (type 'quit' to exit)\n")
 
-    # Turn 2: first guess (chain via previous_response_id)
-    print("--- Sending: 'Is it 50?' ---")
-    r2 = openai_client.responses.create(
-        model=agent_model,
-        input="Is it 50?",
-        previous_response_id=r1.id,
-        extra_body=agent_ref,
-    )
-    print(f"Agent: {r2.output_text}\n")
+    previous_id = None
+    while True:
+        try:
+            user_input = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nBye!")
+            break
 
-    # Turn 3: another guess
-    print("--- Sending: 'How about 25?' ---")
-    r3 = openai_client.responses.create(
-        model=agent_model,
-        input="How about 25?",
-        previous_response_id=r2.id,
-        extra_body=agent_ref,
-    )
-    print(f"Agent: {r3.output_text}")
+        if not user_input or user_input.lower() in ("quit", "exit", "q"):
+            print("Bye!")
+            break
+
+        kwargs = {
+            "model": agent_model,
+            "input": user_input,
+            "store": True,
+            "extra_body": agent_ref,
+        }
+        if previous_id:
+            kwargs["previous_response_id"] = previous_id
+
+        response = openai_client.responses.create(**kwargs)
+        previous_id = response.id
+        print(f"Agent: {response.output_text}\n")
 
 
 if __name__ == "__main__":

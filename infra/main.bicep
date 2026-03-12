@@ -197,7 +197,7 @@ resource containerAppsEnv 'Microsoft.App/managedEnvironments@2024-10-02-preview'
       {
         workloadProfileType: gpuWorkloadProfileType
         name: 'gpu'
-        minimumCount: 0
+        minimumCount: 1
         maximumCount: 1
       }
     ]

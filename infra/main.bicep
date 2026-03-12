@@ -34,8 +34,8 @@ param gpuWorkloadProfileType string = 'NC24-A100'
 @description('Publisher email for APIM.')
 param apimPublisherEmail string
 
-@description('Tags to apply to all resources.')
-param tags object = {}
+@description('The name of the azd environment, used for tagging resources.')
+param environmentName string = 'production'
 
 @description('The name of the azd service for the agent container app.')
 param agentServiceName string = 'agent'
@@ -43,6 +43,10 @@ param agentServiceName string = 'agent'
 // ============================================================================
 // VARIABLES
 // ============================================================================
+
+var tags = {
+  'azd-env-name': environmentName
+}
 
 var resourceToken = toLower(uniqueString(subscription().id, resourceGroup().name, location))
 var aiServicesName = 'ais-${baseName}'

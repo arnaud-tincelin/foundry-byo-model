@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - copilot/create-infrastructure-for-foundry-agent
+      - copilot/fix-pipeline-issues
   workflow_dispatch:
     inputs:
       environment:
@@ -19,6 +19,7 @@ permissions:
 env:
   # azd environment name — override via workflow_dispatch input or change default
   AZD_ENV_NAME: ${{ github.event.inputs.environment || 'production' }}
+  RESOURCE_GROUP_NAME: rg-foundry-byo-model-${{ github.event.inputs.environment || 'production' }}
 
 jobs:
   deploy:
@@ -49,15 +50,28 @@ jobs:
             --federated-credential-provider "github" \
             --tenant-id "${{ secrets.AZURE_TENANT_ID }}"
 
+      - name: Log in to Azure CLI (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       # ---------------------------------------------------------------
-      # 4. Initialize azd environment
+      # 4. Pre-create resource group & initialize azd environment
       # ---------------------------------------------------------------
+      - name: Create resource group
+        run: |
+          az group create \
+            --name "${{ env.RESOURCE_GROUP_NAME }}" \
+            --location "${{ secrets.AZURE_LOCATION }}"
+
       - name: Initialize azd environment
         run: |
           azd env new "${{ env.AZD_ENV_NAME }}" --no-prompt 2>/dev/null || true
           azd env set AZURE_LOCATION "${{ secrets.AZURE_LOCATION }}"
           azd env set AZURE_SUBSCRIPTION_ID "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
-          azd env set AZURE_RESOURCE_GROUP "rg-foundry-byo-model-${{ env.AZD_ENV_NAME }}"
+          azd env set AZURE_RESOURCE_GROUP "${{ env.RESOURCE_GROUP_NAME }}"
           azd env set APIM_PUBLISHER_EMAIL "${{ secrets.APIM_PUBLISHER_EMAIL }}"
         env:
           AZURE_ENV_NAME: ${{ env.AZD_ENV_NAME }}

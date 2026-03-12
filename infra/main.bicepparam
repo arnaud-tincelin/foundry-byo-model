@@ -15,4 +15,4 @@ using './main.bicep'
 param apimPublisherEmail = readEnvironmentVariable('APIM_PUBLISHER_EMAIL', 'admin@contoso.com')
 param environmentName = readEnvironmentVariable('AZURE_ENV_NAME', 'production')
 param modelName = 'microsoft/Phi-4-mini-instruct'
-param gpuWorkloadProfileType = 'NC24-A100'
+param gpuWorkloadProfileType = 'Consumption-GPU-NC8as-T4'

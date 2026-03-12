@@ -1,0 +1,16 @@
+name: foundry-byo-model
+metadata:
+  template: foundry-byo-model
+
+infra:
+  provider: bicep
+  path: infra
+
+services:
+  agent:
+    host: containerapp
+    language: python
+    project: src/agent
+    docker:
+      path: src/agent/Dockerfile
+      context: src/agent

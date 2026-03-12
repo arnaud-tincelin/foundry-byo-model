@@ -66,6 +66,28 @@ export AI_SERVICES_ENDPOINT="<from azd output>"
 cd scripts && uv run setup-foundry-agent.py
 ```
 
+## CI/CD Setup (GitHub Actions)
+
+The deploy workflow (`.github/workflows/deploy.yml`) uses OIDC federated credentials. Run the setup script to create the required Azure AD app registration and role assignments:
+
+```bash
+# Uses the current Azure CLI subscription
+./scripts/setup-github-deploy.sh
+
+# Or specify a subscription explicitly
+./scripts/setup-github-deploy.sh --subscription <subscription-id>
+```
+
+The script will print the GitHub secrets you need to configure under **Settings → Environments → `production` → Secrets**:
+
+| Secret | Description |
+|--------|-------------|
+| `AZURE_CLIENT_ID` | App registration client ID (printed by the script) |
+| `AZURE_TENANT_ID` | Azure AD tenant ID (printed by the script) |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID (printed by the script) |
+| `AZURE_LOCATION` | Azure region, e.g. `eastus2` |
+| `APIM_PUBLISHER_EMAIL` | Email for API Management publisher |
+
 ## Local Development
 
 ```bash
@@ -112,6 +134,7 @@ Edit `infra/main.bicepparam` to customise:
 │   ├── uv.lock             # Locked dependencies
 │   └── Dockerfile          # Container image (uses uv)
 ├── scripts/
+│   ├── setup-github-deploy.sh # OIDC + role setup for GitHub Actions
 │   └── setup-foundry-agent.py  # Post-deploy Foundry registration
 ├── azure.yaml              # azd project configuration
 └── README.md

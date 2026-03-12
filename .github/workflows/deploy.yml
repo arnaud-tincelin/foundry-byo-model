@@ -26,19 +26,36 @@ jobs:
 
     steps:
       # ---------------------------------------------------------------
-      # 1. Checkout
+      # 1. Validate required secrets
+      # ---------------------------------------------------------------
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "${{ secrets.AZURE_CLIENT_ID }}" ] && missing+=("AZURE_CLIENT_ID")
+          [ -z "${{ secrets.AZURE_TENANT_ID }}" ] && missing+=("AZURE_TENANT_ID")
+          [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ] && missing+=("AZURE_SUBSCRIPTION_ID")
+          [ -z "${{ secrets.AZURE_LOCATION }}" ] && missing+=("AZURE_LOCATION")
+          [ -z "${{ secrets.APIM_PUBLISHER_EMAIL }}" ] && missing+=("APIM_PUBLISHER_EMAIL")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]}"
+            echo "Configure these secrets in the GitHub repository settings under the 'production' environment."
+            exit 1
+          fi
+
+      # ---------------------------------------------------------------
+      # 2. Checkout
       # ---------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
       # ---------------------------------------------------------------
-      # 2. Install azd
+      # 3. Install azd
       # ---------------------------------------------------------------
       - name: Install Azure Developer CLI
         uses: Azure/setup-azd@v2
 
       # ---------------------------------------------------------------
-      # 3. Log in to Azure via OIDC (federated credentials)
+      # 4. Log in to Azure via OIDC (federated credentials)
       # ---------------------------------------------------------------
       - name: Log in with Azure (federated credentials)
         run: |
@@ -48,7 +65,7 @@ jobs:
             --tenant-id "${{ secrets.AZURE_TENANT_ID }}"
 
       # ---------------------------------------------------------------
-      # 4. Provision infrastructure + deploy services
+      # 5. Provision infrastructure + deploy services
       # ---------------------------------------------------------------
       - name: Provision & Deploy
         run: azd up --no-prompt

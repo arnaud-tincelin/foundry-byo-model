@@ -29,7 +29,7 @@ param baseName string = toLower(substring(uniqueString(subscription().id, resour
 param modelName string = 'microsoft/Phi-4-mini-instruct'
 
 @description('GPU workload profile type for the model container app.')
-param gpuWorkloadProfileType string = 'NC24-A100'
+param gpuWorkloadProfileType string = 'Consumption-GPU-NC8as-T4'
 
 @description('Publisher email for APIM.')
 param apimPublisherEmail string
@@ -197,8 +197,6 @@ resource containerAppsEnv 'Microsoft.App/managedEnvironments@2024-10-02-preview'
       {
         workloadProfileType: gpuWorkloadProfileType
         name: 'gpu'
-        minimumCount: 1
-        maximumCount: 1
       }
     ]
     zoneRedundant: false
@@ -235,8 +233,9 @@ resource modelApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
           name: 'vllm'
           image: 'vllm/vllm-openai:latest'
           resources: {
-            cpu: json('6')
-            memory: '12Gi'
+            cpu: json('8')
+            memory: '56Gi'
+            gpu: 1
           }
           command: [
             'python3'

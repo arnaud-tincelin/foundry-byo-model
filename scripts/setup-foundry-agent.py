@@ -1,14 +1,18 @@
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "azure-identity",
+#     "azure-ai-projects",
+# ]
+# ///
 """Post-deployment script to register the custom model and agent in Azure AI Foundry.
 
 Run after deploying the infrastructure with `azd up`.
 
-Prerequisites:
-    pip install azure-identity azure-ai-projects
-
 Usage:
     export AI_SERVICES_ENDPOINT="https://<your-ai-services>.cognitiveservices.azure.com/"
-    export MODEL_ENDPOINT="https://<model-app-fqdn>"
-    python scripts/setup-foundry-agent.py
+    uv run scripts/setup-foundry-agent.py
 """
 
 import os

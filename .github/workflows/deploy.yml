@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - copilot/create-infrastructure-for-foundry-agent
   workflow_dispatch:
     inputs:
       environment:
@@ -57,7 +56,6 @@ jobs:
           azd env new "${{ env.AZD_ENV_NAME }}" --no-prompt 2>/dev/null || true
           azd env set AZURE_LOCATION "${{ secrets.AZURE_LOCATION }}"
           azd env set AZURE_SUBSCRIPTION_ID "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
-          azd env set AZURE_RESOURCE_GROUP "rg-foundry-byo-model-${{ env.AZD_ENV_NAME }}"
           azd env set APIM_PUBLISHER_EMAIL "${{ secrets.APIM_PUBLISHER_EMAIL }}"
         env:
           AZURE_ENV_NAME: ${{ env.AZD_ENV_NAME }}

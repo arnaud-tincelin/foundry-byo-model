@@ -16,3 +16,4 @@ param apimPublisherEmail = readEnvironmentVariable('APIM_PUBLISHER_EMAIL', 'admi
 param environmentName = readEnvironmentVariable('AZURE_ENV_NAME', 'production')
 param modelName = 'microsoft/Phi-4-mini-instruct'
 param gpuWorkloadProfileType = 'Consumption-GPU-NC8as-T4'
+param location = readEnvironmentVariable('AZURE_LOCATION', 'swedencentral')

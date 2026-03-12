@@ -4,11 +4,10 @@
   "features": {
     "ghcr.io/devcontainers/features/azure-cli:1": {},
     "ghcr.io/devcontainers/features/python:1": {
-      "version": "3.12"
+      "version": "3.13"
     },
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
-    "ghcr.io/azure/azure-dev/azd:0": {},
-    "ghcr.io/jlaundry/devcontainer-features/uv:1": {}
+     "ghcr.io/devcontainers-extra/features/uv:1": { "version": "latest" },
+    "ghcr.io/azure/azure-dev/azd:latest": {}
   },
   "customizations": {
     "vscode": {
@@ -20,13 +19,9 @@
         "ms-vscode.azurecli"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python",
-        "[python]": {
-          "editor.defaultFormatter": "charliermarsh.ruff"
-        }
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
       }
     }
   },
-  "postCreateCommand": "cd src/agent && uv sync",
   "remoteUser": "vscode"
 }

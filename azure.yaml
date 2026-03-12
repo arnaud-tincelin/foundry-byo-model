@@ -1,16 +1,15 @@
 name: foundry-byo-model
-metadata:
-  template: foundry-byo-model
 
 infra:
   provider: bicep
   path: infra
 
-services:
-  agent:
-    host: containerapp
-    language: python
-    project: src/agent
-    docker:
-      path: ./Dockerfile
-      context: .
+hooks:
+  postprovision:
+    shell: sh
+    run: |
+      AI_SERVICES_ENDPOINT=$(azd env get-value foundryEndpoint) \
+      FOUNDRY_PROJECT_NAME=$(azd env get-value foundryProjectName) \
+      GATEWAY_CONNECTION_NAME=$(azd env get-value gatewayConnectionName) \
+      GATEWAY_MODEL_NAME=$(azd env get-value gatewayModelName) \
+      uv run scripts/setup-foundry-agent.py

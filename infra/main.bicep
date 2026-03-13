@@ -9,24 +9,15 @@ param environmentName string
 @description('Primary location for all resources but AI Foundry.')
 param location string
 
-@description('The open-source model to serve on the GPU container (HuggingFace model ID).')
-param modelName string = 'microsoft/Phi-4-mini-instruct'
-
-@description('GPU workload profile type for the model container app.')
-param gpuWorkloadProfileType string = 'Consumption-GPU-NC8as-T4'
-
 @description('Publisher email for APIM.')
 param apimPublisherEmail string
-
-@description('Name for the model gateway connection in Foundry.')
-param gatewayConnectionName string = 'custom-model-gateway'
-
-@description('The model name exposed through the gateway (used as deployment name).')
-param gatewayModelName string = 'custom-model'
 
 // ============================================================================
 // VARIABLES
 // ============================================================================
+
+@description('The model name exposed through the gateway (used as deployment name).')
+var gatewayModelName string = 'my-custom-model'
 
 #disable-next-line no-unused-vars
 var resourceToken = toLower(uniqueString(resourceGroup().id, environmentName, location))
@@ -111,10 +102,8 @@ resource foundry 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' = {
     }
     disableLocalAuth: false
   }
-}
 
-resource foundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-preview' = {
-  parent: foundry
+  resource project 'projects' = {
   name: 'project-${resourceToken}'
   location: location
   identity: { type: 'SystemAssigned' }
@@ -122,6 +111,7 @@ resource foundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-04-0
     description: 'Foundry BYO Model project with custom agent'
     displayName: 'Guess My Number Agent Project'
   }
+}
 }
 
 // Grant the managed identity Cognitive Services User on AI Services
@@ -149,11 +139,7 @@ resource containerAppsEnv 'Microsoft.App/managedEnvironments@2024-10-02-preview'
     }
     workloadProfiles: [
       {
-        workloadProfileType: 'Consumption'
-        name: 'Consumption'
-      }
-      {
-        workloadProfileType: gpuWorkloadProfileType
+        workloadProfileType: 'Consumption-GPU-NC8as-T4'
         name: 'gpu'
       }
     ]
@@ -198,7 +184,7 @@ resource modelApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
           ]
           args: [
             '--model'
-            modelName
+            'microsoft/Phi-4-mini-instruct'
             '--served-model-name'
             gatewayModelName
             '--port'
@@ -221,167 +207,14 @@ resource modelApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
 // 8. API MANAGEMENT (Internet-facing gateway)
 // ============================================================================
 
-resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' = {
-  name: 'apim-${resourceToken}'
-  location: location
-  tags: tags
-  sku: {
-    name: 'Consumption'
-    capacity: 0
-  }
-  properties: {
-    publisherEmail: apimPublisherEmail
-    publisherName: 'Foundry BYO Model'
-  }
-}
-
-// APIM backend pointing to the vLLM model container app (with /v1 base path)
-resource apimBackend 'Microsoft.ApiManagement/service/backends@2024-06-01-preview' = {
-  parent: apim
-  name: 'vllm-backend'
-  properties: {
-    description: 'vLLM model backend'
-    url: 'https://${modelApp.properties.configuration.ingress.fqdn}/v1'
-    protocol: 'http'
-  }
-}
-
-// Azure OpenAI compatible API with wildcard operations that rewrite paths to vLLM format
-// Foundry sends: /openai/deployments/{name}/chat/completions → vLLM expects: /v1/chat/completions
-resource apimApi 'Microsoft.ApiManagement/service/apis@2024-06-01-preview' = {
-  parent: apim
-  name: 'model-gateway'
-  properties: {
-    displayName: 'Model Gateway API'
-    path: 'openai'
-    protocols: [ 'https' ]
-    subscriptionRequired: true
-    subscriptionKeyParameterNames: {
-      header: 'api-key'
-      query: 'api-key'
-    }
-  }
-}
-
-// Operation: POST /deployments/{deployment-id}/chat/completions → /v1/chat/completions
-resource apimOpChatCompletions 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
-  parent: apimApi
-  name: 'chat-completions'
-  properties: {
-    displayName: 'Chat Completions'
-    method: 'POST'
-    urlTemplate: '/deployments/{deployment-id}/chat/completions'
-    templateParameters: [
-      {
-        name: 'deployment-id'
-        required: true
-        type: 'string'
-      }
-    ]
-  }
-}
-
-resource apimOpChatCompletionsPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
-  parent: apimOpChatCompletions
-  name: 'policy'
-  properties: {
-    format: 'xml'
-    value: '<policies><inbound><base /><rewrite-uri template="/chat/completions" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
-  }
-}
-
-// Operation: GET /deployments/{deployment-id}/models → /v1/models
-resource apimOpModels 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
-  parent: apimApi
-  name: 'list-models'
-  properties: {
-    displayName: 'List Models'
-    method: 'GET'
-    urlTemplate: '/deployments/{deployment-id}/models'
-    templateParameters: [
-      {
-        name: 'deployment-id'
-        required: true
-        type: 'string'
-      }
-    ]
-  }
-}
-
-resource apimOpModelsPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
-  parent: apimOpModels
-  name: 'policy'
-  properties: {
-    format: 'xml'
-    value: '<policies><inbound><base /><rewrite-uri template="/models" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
-  }
-}
-
-// Operation: POST /deployments/{deployment-id}/completions → /v1/completions
-resource apimOpCompletions 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
-  parent: apimApi
-  name: 'completions'
-  properties: {
-    displayName: 'Completions'
-    method: 'POST'
-    urlTemplate: '/deployments/{deployment-id}/completions'
-    templateParameters: [
-      {
-        name: 'deployment-id'
-        required: true
-        type: 'string'
-      }
-    ]
-  }
-}
-
-resource apimOpCompletionsPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
-  parent: apimOpCompletions
-  name: 'policy'
-  properties: {
-    format: 'xml'
-    value: '<policies><inbound><base /><rewrite-uri template="/completions" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
-  }
-}
-
-// Operation: GET /models → /v1/models (direct, no deployment prefix)
-resource apimOpModelsRoot 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
-  parent: apimApi
-  name: 'list-models-root'
-  properties: {
-    displayName: 'List Models (root)'
-    method: 'GET'
-    urlTemplate: '/models'
-  }
-}
-
-resource apimOpModelsRootPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-06-01-preview' = {
-  parent: apimOpModelsRoot
-  name: 'policy'
-  properties: {
-    format: 'xml'
-    value: '<policies><inbound><base /><rewrite-uri template="/models" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
-  }
-}
-
-// API-level policy: set backend, strip api-version, cap max_tokens
-resource apimApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-preview' = {
-  parent: apimApi
-  name: 'policy'
-  properties: {
-    format: 'xml'
-    value: '<policies><inbound><base /><set-backend-service backend-id="${apimBackend.name}" /><set-query-parameter name="api-version" exists-action="delete" /><choose><when condition="@(context.Request.Method == &quot;POST&quot;)"><set-body>@{var body = context.Request.Body.As&lt;JObject&gt;(); if(body["max_tokens"] == null || (int)body["max_tokens"] &gt; 512) { body["max_tokens"] = 512; } return body.ToString();}</set-body></when></choose></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
-  }
-}
-
-// APIM subscription for the API
-resource apimSubscription 'Microsoft.ApiManagement/service/subscriptions@2024-06-01-preview' = {
-  parent: apim
-  name: 'model-gateway-sub'
-  properties: {
-    scope: apimApi.id
-    displayName: 'Model Gateway Subscription'
-    state: 'active'
+module apim 'apim.bicep' = {
+  name: 'apim'
+  params: {
+    location: location
+    tags: tags
+    resourceToken: resourceToken
+    apimPublisherEmail: apimPublisherEmail
+    modelAppFqdn: modelApp.properties.configuration.ingress.fqdn
   }
 }
 
@@ -389,16 +222,18 @@ resource apimSubscription 'Microsoft.ApiManagement/service/subscriptions@2024-06
 // 9. MODEL GATEWAY CONNECTION (register APIM as model gateway in Foundry)
 // ============================================================================
 
+// Note: we use a static list of models in this example
+// but it is also possible to have a dynamic list (requires GET /models endpoint on APIM)
 resource modelGatewayConnection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-04-01-preview' = {
-  name: gatewayConnectionName
-  parent: foundryProject
+  name: 'custom-model-gateway'
+  parent: foundry::project
   properties: {
     category: 'ModelGateway'
-    target: '${apim.properties.gatewayUrl}/openai'
+    target: '${apim.outputs.gatewayUrl}/openai'
     authType: 'ApiKey'
     isSharedToAll: true
     credentials: {
-      key: apimSubscription.listSecrets().primaryKey
+      key: apim.outputs.subscriptionPrimaryKey
     }
     metadata: {
       deploymentInPath: 'true'
@@ -419,14 +254,10 @@ resource modelGatewayConnection 'Microsoft.CognitiveServices/accounts/projects/c
   }
 }
 
-// ============================================================================
-// OUTPUTS
-// ============================================================================
-
 // AI Foundry
 output foundryEndpoint string = foundry.properties.endpoint
 output foundryName string = foundry.name
-output foundryProjectName string = foundryProject.name
+output foundryProjectName string = foundry::project.name
 
 // Container Apps
 output modelAppFqdn string = modelApp.properties.configuration.ingress.fqdn
@@ -434,7 +265,7 @@ output containerRegistryLoginServer string = containerRegistry.properties.loginS
 output containerRegistryName string = containerRegistry.name
 
 // APIM
-output apimGatewayUrl string = apim.properties.gatewayUrl
+output apimGatewayUrl string = apim.outputs.gatewayUrl
 
 // Model Gateway Connection
 output gatewayConnectionName string = modelGatewayConnection.name

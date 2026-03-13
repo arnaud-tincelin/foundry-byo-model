@@ -40,7 +40,7 @@ def main():
     project_endpoint = f"{endpoint.rstrip('/')}/api/projects/{project_name}"
 
     gateway_connection = os.environ.get("GATEWAY_CONNECTION_NAME", "custom-model-gateway")
-    gateway_model = os.environ.get("GATEWAY_MODEL_NAME", "custom-model")
+    gateway_model = os.environ.get("GATEWAY_MODEL_NAME", "my-custom-model")
     agent_model = f"{gateway_connection}/{gateway_model}"
 
     credential = DefaultAzureCredential()

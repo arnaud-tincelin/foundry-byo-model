@@ -10,7 +10,7 @@ on:
       environment:
         description: "Azure environment name (azd env)"
         required: false
-        default: "production"
+        default: "dev"
 
 permissions:
   id-token: write   # Required for OIDC / federated credentials
@@ -25,7 +25,6 @@ jobs:
   deploy:
     name: Provision & Deploy
     runs-on: ubuntu-latest
-    environment: production  # GitHub Environment (for protection rules / secrets)
 
     steps:
       # ---------------------------------------------------------------
@@ -39,6 +38,12 @@ jobs:
       # ---------------------------------------------------------------
       - name: Install Azure Developer CLI
         uses: Azure/setup-azd@v2
+
+      # ---------------------------------------------------------------
+      # 2b. Install uv (needed by postprovision hook)
+      # ---------------------------------------------------------------
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
 
       # ---------------------------------------------------------------
       # 3. Log in to Azure via OIDC (federated credentials)

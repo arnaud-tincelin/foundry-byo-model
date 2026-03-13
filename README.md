@@ -1,6 +1,6 @@
 # Foundry BYO Model
 
-**Bring Your Own Model** to [Azure AI Foundry](https://learn.microsoft.com/azure/ai-studio/) — serve any open-source LLM on a GPU Container App and wire it into Foundry as a first-class model gateway, ready for agents.
+**Bring Your Own Model** to [Azure AI Foundry](https://learn.microsoft.com/azure/ai-studio/) — serve any LLM and wire it into Foundry as a first-class [model gateway](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/ai-gateway), ready for agents.
 
 This template deploys the full infrastructure with `azd` and registers a sample "Guess My Number" prompt agent that talks to your model.
 

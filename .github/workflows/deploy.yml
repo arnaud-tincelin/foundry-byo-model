@@ -25,6 +25,7 @@ jobs:
   deploy:
     name: Provision & Deploy
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
       # ---------------------------------------------------------------

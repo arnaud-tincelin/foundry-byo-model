@@ -112,10 +112,17 @@ az role assignment create \
   --scope "$SCOPE" \
   -o none 2>/dev/null || echo "    (Role may already be assigned)"
 
-echo "==> Assigning User Access Administrator role on subscription ${SUB_ID}..."
+echo "==> Assigning Role Based Access Control Administrator role on subscription ${SUB_ID}..."
 az role assignment create \
   --assignee "$SP_OBJECT_ID" \
-  --role "User Access Administrator" \
+  --role "Role Based Access Control Administrator" \
+  --scope "$SCOPE" \
+  -o none 2>/dev/null || echo "    (Role may already be assigned)"
+
+echo "==> Assigning Azure AI Project Manager role on subscription ${SUB_ID}..."
+az role assignment create \
+  --assignee "$SP_OBJECT_ID" \
+  --role "Azure AI Project Manager" \
   --scope "$SCOPE" \
   -o none 2>/dev/null || echo "    (Role may already be assigned)"
 

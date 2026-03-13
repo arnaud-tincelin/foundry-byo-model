@@ -1,0 +1,560 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "languageVersion": "2.0",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.41.2.15936",
+      "templateHash": "1694848573440688938"
+    }
+  },
+  "parameters": {
+    "environmentName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "metadata": {
+        "description": "Name of the the environment which is used to generate a short unique hash used in all resources."
+      }
+    },
+    "location": {
+      "type": "string",
+      "minLength": 1,
+      "metadata": {
+        "description": "Primary location for all resources but AI Foundry."
+      }
+    },
+    "apimPublisherEmail": {
+      "type": "string",
+      "metadata": {
+        "description": "Publisher email for APIM."
+      }
+    }
+  },
+  "variables": {
+    "gatewayModelName": "my-custom-model",
+    "resourceToken": "[toLower(uniqueString(resourceGroup().id, parameters('environmentName'), parameters('location')))]",
+    "tags": {
+      "azd-env-name": "[parameters('environmentName')]"
+    },
+    "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
+    "cognitiveServicesUserRoleId": "a97b65f3-24c7-4388-baec-2e87135dc908"
+  },
+  "resources": {
+    "foundry::project": {
+      "type": "Microsoft.CognitiveServices/accounts/projects",
+      "apiVersion": "2025-04-01-preview",
+      "name": "[format('{0}/{1}', format('foundry-{0}', variables('resourceToken')), format('project-{0}', variables('resourceToken')))]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "description": "Foundry BYO Model project with custom agent",
+        "displayName": "Guess My Number Agent Project"
+      },
+      "dependsOn": [
+        "foundry"
+      ]
+    },
+    "logAnalytics": {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2023-09-01",
+      "name": "[format('law-{0}', variables('resourceToken'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": 30
+      }
+    },
+    "appInsights": {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[format('appi-{0}', variables('resourceToken'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "kind": "web",
+      "properties": {
+        "Application_Type": "web",
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', variables('resourceToken')))]"
+      },
+      "dependsOn": [
+        "logAnalytics"
+      ]
+    },
+    "containerAppsIdentity": {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[format('id-ca-{0}', variables('resourceToken'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]"
+    },
+    "containerRegistry": {
+      "type": "Microsoft.ContainerRegistry/registries",
+      "apiVersion": "2023-11-01-preview",
+      "name": "[toLower(replace(format('acr{0}', variables('resourceToken')), '-', ''))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "sku": {
+        "name": "Basic"
+      },
+      "properties": {
+        "adminUserEnabled": false
+      }
+    },
+    "acrPullAssignment": {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.ContainerRegistry/registries', toLower(replace(format('acr{0}', variables('resourceToken')), '-', '')))]",
+      "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', toLower(replace(format('acr{0}', variables('resourceToken')), '-', ''))), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-ca-{0}', variables('resourceToken'))), variables('acrPullRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPullRoleId'))]",
+        "principalId": "[reference('containerAppsIdentity').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "containerAppsIdentity",
+        "containerRegistry"
+      ]
+    },
+    "foundry": {
+      "type": "Microsoft.CognitiveServices/accounts",
+      "apiVersion": "2025-04-01-preview",
+      "name": "[format('foundry-{0}', variables('resourceToken'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "sku": {
+        "name": "S0"
+      },
+      "kind": "AIServices",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "allowProjectManagement": true,
+        "customSubDomainName": "[format('foundry-{0}', variables('resourceToken'))]",
+        "publicNetworkAccess": "Enabled",
+        "networkAcls": {
+          "defaultAction": "Allow",
+          "virtualNetworkRules": [],
+          "ipRules": [],
+          "bypass": "AzureServices"
+        },
+        "disableLocalAuth": false
+      }
+    },
+    "cogServicesUserAssignment": {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.CognitiveServices/accounts', format('foundry-{0}', variables('resourceToken')))]",
+      "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', format('foundry-{0}', variables('resourceToken'))), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-ca-{0}', variables('resourceToken'))), variables('cognitiveServicesUserRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('cognitiveServicesUserRoleId'))]",
+        "principalId": "[reference('containerAppsIdentity').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "containerAppsIdentity",
+        "foundry"
+      ]
+    },
+    "containerAppsEnv": {
+      "type": "Microsoft.App/managedEnvironments",
+      "apiVersion": "2024-10-02-preview",
+      "name": "[format('cae-{0}', variables('resourceToken'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "appLogsConfiguration": {
+          "destination": "log-analytics",
+          "logAnalyticsConfiguration": {
+            "customerId": "[reference('logAnalytics').customerId]",
+            "sharedKey": "[listKeys('logAnalytics', '2023-09-01').primarySharedKey]"
+          }
+        },
+        "workloadProfiles": [
+          {
+            "workloadProfileType": "Consumption-GPU-NC8as-T4",
+            "name": "gpu"
+          }
+        ],
+        "zoneRedundant": false
+      },
+      "dependsOn": [
+        "logAnalytics"
+      ]
+    },
+    "modelApp": {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2024-10-02-preview",
+      "name": "[format('ca-model-{0}', variables('resourceToken'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-ca-{0}', variables('resourceToken'))))]": {}
+        }
+      },
+      "properties": {
+        "environmentId": "[resourceId('Microsoft.App/managedEnvironments', format('cae-{0}', variables('resourceToken')))]",
+        "workloadProfileName": "gpu",
+        "configuration": {
+          "ingress": {
+            "external": true,
+            "targetPort": 8000,
+            "transport": "http"
+          }
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "vllm",
+              "image": "vllm/vllm-openai:latest",
+              "resources": {
+                "cpu": "[json('8')]",
+                "memory": "56Gi",
+                "gpu": 1
+              },
+              "command": [
+                "python3",
+                "-m",
+                "vllm.entrypoints.openai.api_server"
+              ],
+              "args": [
+                "--model",
+                "microsoft/Phi-4-mini-instruct",
+                "--served-model-name",
+                "[variables('gatewayModelName')]",
+                "--port",
+                "8000",
+                "--trust-remote-code",
+                "--max-model-len",
+                "16384"
+              ]
+            }
+          ],
+          "scale": {
+            "minReplicas": 1,
+            "maxReplicas": 1
+          }
+        }
+      },
+      "dependsOn": [
+        "containerAppsEnv",
+        "containerAppsIdentity"
+      ]
+    },
+    "modelGatewayConnection": {
+      "type": "Microsoft.CognitiveServices/accounts/projects/connections",
+      "apiVersion": "2025-04-01-preview",
+      "name": "[format('{0}/{1}/{2}', format('foundry-{0}', variables('resourceToken')), format('project-{0}', variables('resourceToken')), 'custom-model-gateway')]",
+      "properties": {
+        "category": "ModelGateway",
+        "target": "[format('{0}/openai', reference('apim').outputs.gatewayUrl.value)]",
+        "authType": "ApiKey",
+        "isSharedToAll": true,
+        "credentials": {
+          "key": "[listOutputsWithSecureValues('apim', '2025-04-01').subscriptionPrimaryKey]"
+        },
+        "metadata": {
+          "deploymentInPath": "true",
+          "inferenceAPIVersion": "",
+          "models": "[string(createArray(createObject('name', variables('gatewayModelName'), 'properties', createObject('model', createObject('name', variables('gatewayModelName'), 'version', '1', 'format', 'OpenAI')))))]"
+        }
+      },
+      "dependsOn": [
+        "apim",
+        "foundry::project"
+      ]
+    },
+    "apim": {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "apim",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "resourceToken": {
+            "value": "[variables('resourceToken')]"
+          },
+          "apimPublisherEmail": {
+            "value": "[parameters('apimPublisherEmail')]"
+          },
+          "modelAppFqdn": {
+            "value": "[reference('modelApp').configuration.ingress.fqdn]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "languageVersion": "2.0",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "16372029354174755322"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the APIM resource."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags to apply to all resources."
+              }
+            },
+            "resourceToken": {
+              "type": "string",
+              "metadata": {
+                "description": "Unique token for resource naming."
+              }
+            },
+            "apimPublisherEmail": {
+              "type": "string",
+              "metadata": {
+                "description": "Publisher email for APIM."
+              }
+            },
+            "modelAppFqdn": {
+              "type": "string",
+              "metadata": {
+                "description": "FQDN of the vLLM model container app."
+              }
+            }
+          },
+          "resources": {
+            "apim": {
+              "type": "Microsoft.ApiManagement/service",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('apim-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Consumption",
+                "capacity": 0
+              },
+              "properties": {
+                "publisherEmail": "[parameters('apimPublisherEmail')]",
+                "publisherName": "Foundry BYO Model"
+              }
+            },
+            "apimBackend": {
+              "type": "Microsoft.ApiManagement/service/backends",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}', format('apim-{0}', parameters('resourceToken')), 'vllm-backend')]",
+              "properties": {
+                "description": "vLLM model backend",
+                "url": "[format('https://{0}/v1', parameters('modelAppFqdn'))]",
+                "protocol": "http"
+              },
+              "dependsOn": [
+                "apim"
+              ]
+            },
+            "apimApi": {
+              "type": "Microsoft.ApiManagement/service/apis",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}', format('apim-{0}', parameters('resourceToken')), 'model-gateway')]",
+              "properties": {
+                "displayName": "Model Gateway API",
+                "path": "openai",
+                "protocols": [
+                  "https"
+                ],
+                "subscriptionRequired": true,
+                "subscriptionKeyParameterNames": {
+                  "header": "api-key",
+                  "query": "api-key"
+                }
+              },
+              "dependsOn": [
+                "apim"
+              ]
+            },
+            "apimOpChatCompletions": {
+              "type": "Microsoft.ApiManagement/service/apis/operations",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}/{2}', format('apim-{0}', parameters('resourceToken')), 'model-gateway', 'chat-completions')]",
+              "properties": {
+                "displayName": "Chat Completions",
+                "method": "POST",
+                "urlTemplate": "/deployments/{deployment-id}/chat/completions",
+                "templateParameters": [
+                  {
+                    "name": "deployment-id",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              "dependsOn": [
+                "apimApi"
+              ]
+            },
+            "apimOpChatCompletionsPolicy": {
+              "type": "Microsoft.ApiManagement/service/apis/operations/policies",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}/{2}/{3}', format('apim-{0}', parameters('resourceToken')), 'model-gateway', 'chat-completions', 'policy')]",
+              "properties": {
+                "format": "xml",
+                "value": "<policies><inbound><base /><rewrite-uri template=\"/chat/completions\" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>"
+              },
+              "dependsOn": [
+                "apimOpChatCompletions"
+              ]
+            },
+            "apimOpCompletions": {
+              "type": "Microsoft.ApiManagement/service/apis/operations",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}/{2}', format('apim-{0}', parameters('resourceToken')), 'model-gateway', 'completions')]",
+              "properties": {
+                "displayName": "Completions",
+                "method": "POST",
+                "urlTemplate": "/deployments/{deployment-id}/completions",
+                "templateParameters": [
+                  {
+                    "name": "deployment-id",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              "dependsOn": [
+                "apimApi"
+              ]
+            },
+            "apimOpCompletionsPolicy": {
+              "type": "Microsoft.ApiManagement/service/apis/operations/policies",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}/{2}/{3}', format('apim-{0}', parameters('resourceToken')), 'model-gateway', 'completions', 'policy')]",
+              "properties": {
+                "format": "xml",
+                "value": "<policies><inbound><base /><rewrite-uri template=\"/completions\" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>"
+              },
+              "dependsOn": [
+                "apimOpCompletions"
+              ]
+            },
+            "apimApiPolicy": {
+              "type": "Microsoft.ApiManagement/service/apis/policies",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}/{2}', format('apim-{0}', parameters('resourceToken')), 'model-gateway', 'policy')]",
+              "properties": {
+                "format": "xml",
+                "value": "[format('<policies><inbound><base /><set-backend-service backend-id=\"{0}\" /><set-query-parameter name=\"api-version\" exists-action=\"delete\" /><choose><when condition=\"@(context.Request.Method == &quot;POST&quot;)\"><set-body>@{{var body = context.Request.Body.As&lt;JObject&gt;(); if(body[\"max_tokens\"] == null || (int)body[\"max_tokens\"] &gt; 512) {{ body[\"max_tokens\"] = 512; }} return body.ToString();}}</set-body></when></choose></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>', 'vllm-backend')]"
+              },
+              "dependsOn": [
+                "apimApi",
+                "apimBackend"
+              ]
+            },
+            "apimSubscription": {
+              "type": "Microsoft.ApiManagement/service/subscriptions",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}', format('apim-{0}', parameters('resourceToken')), 'model-gateway-sub')]",
+              "properties": {
+                "scope": "[resourceId('Microsoft.ApiManagement/service/apis', format('apim-{0}', parameters('resourceToken')), 'model-gateway')]",
+                "displayName": "Model Gateway Subscription",
+                "state": "active"
+              },
+              "dependsOn": [
+                "apim",
+                "apimApi"
+              ]
+            }
+          },
+          "outputs": {
+            "gatewayUrl": {
+              "type": "string",
+              "value": "[reference('apim').gatewayUrl]"
+            },
+            "subscriptionPrimaryKey": {
+              "type": "securestring",
+              "value": "[listSecrets('apimSubscription', '2024-06-01-preview').primaryKey]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "modelApp"
+      ]
+    }
+  },
+  "outputs": {
+    "foundryEndpoint": {
+      "type": "string",
+      "value": "[reference('foundry').endpoint]"
+    },
+    "foundryName": {
+      "type": "string",
+      "value": "[format('foundry-{0}', variables('resourceToken'))]"
+    },
+    "foundryProjectName": {
+      "type": "string",
+      "value": "[format('project-{0}', variables('resourceToken'))]"
+    },
+    "modelAppFqdn": {
+      "type": "string",
+      "value": "[reference('modelApp').configuration.ingress.fqdn]"
+    },
+    "containerRegistryLoginServer": {
+      "type": "string",
+      "value": "[reference('containerRegistry').loginServer]"
+    },
+    "containerRegistryName": {
+      "type": "string",
+      "value": "[toLower(replace(format('acr{0}', variables('resourceToken')), '-', ''))]"
+    },
+    "apimGatewayUrl": {
+      "type": "string",
+      "value": "[reference('apim').outputs.gatewayUrl.value]"
+    },
+    "gatewayConnectionName": {
+      "type": "string",
+      "value": "custom-model-gateway"
+    },
+    "gatewayModelName": {
+      "type": "string",
+      "value": "[variables('gatewayModelName')]"
+    },
+    "logAnalyticsWorkspaceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', variables('resourceToken')))]"
+    },
+    "appInsightsConnectionString": {
+      "type": "string",
+      "value": "[reference('appInsights').ConnectionString]"
+    },
+    "managedIdentityClientId": {
+      "type": "string",
+      "value": "[reference('containerAppsIdentity').clientId]"
+    },
+    "AZURE_CONTAINER_REGISTRY_ENDPOINT": {
+      "type": "string",
+      "value": "[reference('containerRegistry').loginServer]"
+    },
+    "AZURE_CONTAINER_REGISTRY_NAME": {
+      "type": "string",
+      "value": "[toLower(replace(format('acr{0}', variables('resourceToken')), '-', ''))]"
+    }
+  }
+}

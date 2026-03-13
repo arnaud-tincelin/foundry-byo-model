@@ -18,8 +18,8 @@ permissions:
 
 env:
   # azd environment name — override via workflow_dispatch input or change default
-  AZD_ENV_NAME: ${{ github.event.inputs.environment || 'production' }}
-  RESOURCE_GROUP_NAME: rg-foundry-byo-model-${{ github.event.inputs.environment || 'production' }}
+  AZD_ENV_NAME: ${{ github.event.inputs.environment || 'dev' }}
+  RESOURCE_GROUP_NAME: rg-foundry-byo-model-${{ github.event.inputs.environment || 'dev' }}
 
 jobs:
   deploy:

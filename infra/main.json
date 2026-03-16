@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "1694848573440688938"
+      "templateHash": "9619611315532333794"
     }
   },
   "parameters": {
@@ -38,25 +38,15 @@
     "tags": {
       "azd-env-name": "[parameters('environmentName')]"
     },
-    "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
-    "cognitiveServicesUserRoleId": "a97b65f3-24c7-4388-baec-2e87135dc908"
+    "cognitiveServicesUserRoleId": "a97b65f3-24c7-4388-baec-2e87135dc908",
+    "setupScript": "#!/bin/sh\nset -e\n\npip install -q azure-identity azure-ai-projects\n\npython3 -c \"\nimport os\nfrom azure.identity import ManagedIdentityCredential\nfrom azure.ai.projects import AIProjectClient\nfrom azure.ai.projects.models import PromptAgentDefinition\n\nendpoint = os.environ['AI_SERVICES_ENDPOINT']\nproject = os.environ['FOUNDRY_PROJECT_NAME']\nconn = os.environ['GATEWAY_CONNECTION_NAME']\nmodel = os.environ['GATEWAY_MODEL_NAME']\nclient_id = os.environ['AZURE_CLIENT_ID']\n\nproject_endpoint = f'{endpoint.rstrip(chr(47))}/api/projects/{project}'\nmodel_name = f'{conn}/{model}'\n\ncred = ManagedIdentityCredential(client_id=client_id)\nclient = AIProjectClient(endpoint=project_endpoint, credential=cred)\n\ndefinition = PromptAgentDefinition(\n    model=model_name,\n    instructions='You are a fun game host for Guess My Number. Pick a random number between 0 and 100 and have the player guess it. Give hints like higher or lower after each guess. Be encouraging and fun!',\n)\nagent = client.agents.create_version(\n    agent_name='guess-my-number',\n    definition=definition,\n    description='Guess My Number game host agent backed by a custom model via gateway',\n)\nprint(f'Agent created: {agent.name} v{agent.version} model={model_name}')\n\"\n"
   },
   "resources": {
-    "foundry::project": {
+    "foundryRef::project": {
+      "existing": true,
       "type": "Microsoft.CognitiveServices/accounts/projects",
       "apiVersion": "2025-04-01-preview",
-      "name": "[format('{0}/{1}', format('foundry-{0}', variables('resourceToken')), format('project-{0}', variables('resourceToken')))]",
-      "location": "[parameters('location')]",
-      "identity": {
-        "type": "SystemAssigned"
-      },
-      "properties": {
-        "description": "Foundry BYO Model project with custom agent",
-        "displayName": "Guess My Number Agent Project"
-      },
-      "dependsOn": [
-        "foundry"
-      ]
+      "name": "[format('{0}/{1}', format('foundry-{0}', variables('resourceToken')), format('project-{0}', variables('resourceToken')))]"
     },
     "logAnalytics": {
       "type": "Microsoft.OperationalInsights/workspaces",
@@ -93,60 +83,6 @@
       "location": "[parameters('location')]",
       "tags": "[variables('tags')]"
     },
-    "containerRegistry": {
-      "type": "Microsoft.ContainerRegistry/registries",
-      "apiVersion": "2023-11-01-preview",
-      "name": "[toLower(replace(format('acr{0}', variables('resourceToken')), '-', ''))]",
-      "location": "[parameters('location')]",
-      "tags": "[variables('tags')]",
-      "sku": {
-        "name": "Basic"
-      },
-      "properties": {
-        "adminUserEnabled": false
-      }
-    },
-    "acrPullAssignment": {
-      "type": "Microsoft.Authorization/roleAssignments",
-      "apiVersion": "2022-04-01",
-      "scope": "[resourceId('Microsoft.ContainerRegistry/registries', toLower(replace(format('acr{0}', variables('resourceToken')), '-', '')))]",
-      "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', toLower(replace(format('acr{0}', variables('resourceToken')), '-', ''))), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-ca-{0}', variables('resourceToken'))), variables('acrPullRoleId'))]",
-      "properties": {
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPullRoleId'))]",
-        "principalId": "[reference('containerAppsIdentity').principalId]",
-        "principalType": "ServicePrincipal"
-      },
-      "dependsOn": [
-        "containerAppsIdentity",
-        "containerRegistry"
-      ]
-    },
-    "foundry": {
-      "type": "Microsoft.CognitiveServices/accounts",
-      "apiVersion": "2025-04-01-preview",
-      "name": "[format('foundry-{0}', variables('resourceToken'))]",
-      "location": "[parameters('location')]",
-      "tags": "[variables('tags')]",
-      "sku": {
-        "name": "S0"
-      },
-      "kind": "AIServices",
-      "identity": {
-        "type": "SystemAssigned"
-      },
-      "properties": {
-        "allowProjectManagement": true,
-        "customSubDomainName": "[format('foundry-{0}', variables('resourceToken'))]",
-        "publicNetworkAccess": "Enabled",
-        "networkAcls": {
-          "defaultAction": "Allow",
-          "virtualNetworkRules": [],
-          "ipRules": [],
-          "bypass": "AzureServices"
-        },
-        "disableLocalAuth": false
-      }
-    },
     "cogServicesUserAssignment": {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
@@ -158,9 +94,14 @@
         "principalType": "ServicePrincipal"
       },
       "dependsOn": [
-        "containerAppsIdentity",
-        "foundry"
+        "containerAppsIdentity"
       ]
+    },
+    "foundryRef": {
+      "existing": true,
+      "type": "Microsoft.CognitiveServices/accounts",
+      "apiVersion": "2025-04-01-preview",
+      "name": "[format('foundry-{0}', variables('resourceToken'))]"
     },
     "containerAppsEnv": {
       "type": "Microsoft.App/managedEnvironments",
@@ -176,6 +117,10 @@
             "sharedKey": "[listKeys('logAnalytics', '2023-09-01').primarySharedKey]"
           }
         },
+        "vnetConfiguration": {
+          "infrastructureSubnetId": "[reference('network').outputs.snetAcaId.value]",
+          "internal": true
+        },
         "workloadProfiles": [
           {
             "workloadProfileType": "Consumption-GPU-NC8as-T4",
@@ -185,7 +130,8 @@
         "zoneRedundant": false
       },
       "dependsOn": [
-        "logAnalytics"
+        "logAnalytics",
+        "network"
       ]
     },
     "modelApp": {
@@ -249,6 +195,71 @@
         "containerAppsIdentity"
       ]
     },
+    "agentSetupJob": {
+      "type": "Microsoft.App/jobs",
+      "apiVersion": "2024-10-02-preview",
+      "name": "[format('job-agent-setup-{0}', variables('resourceToken'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-ca-{0}', variables('resourceToken'))))]": {}
+        }
+      },
+      "properties": {
+        "environmentId": "[resourceId('Microsoft.App/managedEnvironments', format('cae-{0}', variables('resourceToken')))]",
+        "configuration": {
+          "triggerType": "Manual",
+          "replicaTimeout": 300,
+          "replicaRetryLimit": 0
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "agent-setup",
+              "image": "python:3.13-slim",
+              "resources": {
+                "cpu": "[json('0.5')]",
+                "memory": "1Gi"
+              },
+              "command": [
+                "sh",
+                "-c",
+                "[variables('setupScript')]"
+              ],
+              "env": [
+                {
+                  "name": "AI_SERVICES_ENDPOINT",
+                  "value": "[reference('foundry').outputs.foundryEndpoint.value]"
+                },
+                {
+                  "name": "FOUNDRY_PROJECT_NAME",
+                  "value": "[reference('foundry').outputs.projectName.value]"
+                },
+                {
+                  "name": "GATEWAY_CONNECTION_NAME",
+                  "value": "custom-model-gateway"
+                },
+                {
+                  "name": "GATEWAY_MODEL_NAME",
+                  "value": "[variables('gatewayModelName')]"
+                },
+                {
+                  "name": "AZURE_CLIENT_ID",
+                  "value": "[reference('containerAppsIdentity').clientId]"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "containerAppsEnv",
+        "containerAppsIdentity",
+        "foundry"
+      ]
+    },
     "modelGatewayConnection": {
       "type": "Microsoft.CognitiveServices/accounts/projects/connections",
       "apiVersion": "2025-04-01-preview",
@@ -268,8 +279,605 @@
         }
       },
       "dependsOn": [
-        "apim",
-        "foundry::project"
+        "apim"
+      ]
+    },
+    "network": {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "network",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "resourceToken": {
+            "value": "[variables('resourceToken')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "18103947928243437253"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for all networking resources."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags to apply to all resources."
+              }
+            },
+            "resourceToken": {
+              "type": "string",
+              "metadata": {
+                "description": "Unique token for resource naming."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/virtualNetworks",
+              "apiVersion": "2024-05-01",
+              "name": "[format('vnet-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "addressSpace": {
+                  "addressPrefixes": [
+                    "10.0.0.0/16"
+                  ]
+                },
+                "subnets": [
+                  {
+                    "name": "snet-apim",
+                    "properties": {
+                      "addressPrefix": "10.0.0.0/24",
+                      "networkSecurityGroup": {
+                        "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-apim-{0}', parameters('resourceToken')))]"
+                      },
+                      "delegations": [
+                        {
+                          "name": "apim-delegation",
+                          "properties": {
+                            "serviceName": "Microsoft.Web/serverFarms"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "name": "snet-aca",
+                    "properties": {
+                      "addressPrefix": "10.0.2.0/23",
+                      "networkSecurityGroup": {
+                        "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-aca-{0}', parameters('resourceToken')))]"
+                      },
+                      "delegations": [
+                        {
+                          "name": "aca-delegation",
+                          "properties": {
+                            "serviceName": "Microsoft.App/environments"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "name": "snet-pe",
+                    "properties": {
+                      "addressPrefix": "10.0.4.0/24",
+                      "networkSecurityGroup": {
+                        "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-pe-{0}', parameters('resourceToken')))]"
+                      }
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-aca-{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-apim-{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-pe-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2024-05-01",
+              "name": "[format('nsg-apim-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "allow-apim-management",
+                    "properties": {
+                      "priority": 100,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourceAddressPrefix": "ApiManagement",
+                      "sourcePortRange": "*",
+                      "destinationAddressPrefix": "VirtualNetwork",
+                      "destinationPortRange": "3443"
+                    }
+                  },
+                  {
+                    "name": "allow-https-inbound",
+                    "properties": {
+                      "priority": 110,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourceAddressPrefix": "Internet",
+                      "sourcePortRange": "*",
+                      "destinationAddressPrefix": "VirtualNetwork",
+                      "destinationPortRange": "443"
+                    }
+                  },
+                  {
+                    "name": "allow-load-balancer",
+                    "properties": {
+                      "priority": 120,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "*",
+                      "sourceAddressPrefix": "AzureLoadBalancer",
+                      "sourcePortRange": "*",
+                      "destinationAddressPrefix": "VirtualNetwork",
+                      "destinationPortRange": "6390"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2024-05-01",
+              "name": "[format('nsg-aca-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2024-05-01",
+              "name": "[format('nsg-pe-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2024-06-01",
+              "name": "privatelink.cognitiveservices.azure.com",
+              "location": "global",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2024-06-01",
+              "name": "privatelink.openai.azure.com",
+              "location": "global",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2024-06-01",
+              "name": "privatelink.services.ai.azure.com",
+              "location": "global",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2024-06-01",
+              "name": "[format('{0}/{1}', 'privatelink.cognitiveservices.azure.com', 'link-cogservices')]",
+              "location": "global",
+              "properties": {
+                "virtualNetwork": {
+                  "id": "[resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken')))]"
+                },
+                "registrationEnabled": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.cognitiveservices.azure.com')]",
+                "[resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2024-06-01",
+              "name": "[format('{0}/{1}', 'privatelink.openai.azure.com', 'link-openai')]",
+              "location": "global",
+              "properties": {
+                "virtualNetwork": {
+                  "id": "[resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken')))]"
+                },
+                "registrationEnabled": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.openai.azure.com')]",
+                "[resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2024-06-01",
+              "name": "[format('{0}/{1}', 'privatelink.services.ai.azure.com', 'link-aiservices')]",
+              "location": "global",
+              "properties": {
+                "virtualNetwork": {
+                  "id": "[resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken')))]"
+                },
+                "registrationEnabled": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.services.ai.azure.com')]",
+                "[resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "vnetId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken')))]"
+            },
+            "snetApimId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken'))), '2024-05-01').subnets[0].id]"
+            },
+            "snetAcaId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken'))), '2024-05-01').subnets[1].id]"
+            },
+            "snetPeId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken'))), '2024-05-01').subnets[2].id]"
+            },
+            "dnsCognitiveServicesId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.cognitiveservices.azure.com')]"
+            },
+            "dnsOpenAiId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.openai.azure.com')]"
+            },
+            "dnsAiServicesId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.services.ai.azure.com')]"
+            }
+          }
+        }
+      }
+    },
+    "foundry": {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "foundry",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "resourceToken": {
+            "value": "[variables('resourceToken')]"
+          },
+          "peSubnetId": {
+            "value": "[reference('network').outputs.snetPeId.value]"
+          },
+          "dnsCognitiveServicesId": {
+            "value": "[reference('network').outputs.dnsCognitiveServicesId.value]"
+          },
+          "dnsOpenAiId": {
+            "value": "[reference('network').outputs.dnsOpenAiId.value]"
+          },
+          "dnsAiServicesId": {
+            "value": "[reference('network').outputs.dnsAiServicesId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "10222613213282779706"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags to apply to all resources."
+              }
+            },
+            "resourceToken": {
+              "type": "string",
+              "metadata": {
+                "description": "Unique token for resource naming."
+              }
+            },
+            "peSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Subnet resource ID for private endpoints."
+              }
+            },
+            "dnsCognitiveServicesId": {
+              "type": "string",
+              "metadata": {
+                "description": "Private DNS zone ID for Cognitive Services."
+              }
+            },
+            "dnsOpenAiId": {
+              "type": "string",
+              "metadata": {
+                "description": "Private DNS zone ID for OpenAI."
+              }
+            },
+            "dnsAiServicesId": {
+              "type": "string",
+              "metadata": {
+                "description": "Private DNS zone ID for AI Services."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.CognitiveServices/accounts/projects",
+              "apiVersion": "2025-04-01-preview",
+              "name": "[format('{0}/{1}', format('foundry-{0}', parameters('resourceToken')), format('project-{0}', parameters('resourceToken')))]",
+              "location": "[parameters('location')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "description": "Foundry BYO Model project with custom agent",
+                "displayName": "Guess My Number Agent Project"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', format('foundry-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.CognitiveServices/accounts",
+              "apiVersion": "2025-04-01-preview",
+              "name": "[format('foundry-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "S0"
+              },
+              "kind": "AIServices",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "allowProjectManagement": true,
+                "customSubDomainName": "[format('foundry-{0}', parameters('resourceToken'))]",
+                "publicNetworkAccess": "Disabled",
+                "networkAcls": {
+                  "defaultAction": "Deny",
+                  "virtualNetworkRules": [],
+                  "ipRules": [],
+                  "bypass": "AzureServices"
+                },
+                "disableLocalAuth": false
+              }
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2024-05-01",
+              "name": "[format('pe-foundry-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('peSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "foundry-connection",
+                    "properties": {
+                      "privateLinkServiceId": "[resourceId('Microsoft.CognitiveServices/accounts', format('foundry-{0}', parameters('resourceToken')))]",
+                      "groupIds": [
+                        "account"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', format('foundry-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+              "apiVersion": "2024-05-01",
+              "name": "[format('{0}/{1}', format('pe-foundry-{0}', parameters('resourceToken')), 'foundry-dns-group')]",
+              "properties": {
+                "privateDnsZoneConfigs": [
+                  {
+                    "name": "cogservices-dns-config",
+                    "properties": {
+                      "privateDnsZoneId": "[parameters('dnsCognitiveServicesId')]"
+                    }
+                  },
+                  {
+                    "name": "openai-dns-config",
+                    "properties": {
+                      "privateDnsZoneId": "[parameters('dnsOpenAiId')]"
+                    }
+                  },
+                  {
+                    "name": "aiservices-dns-config",
+                    "properties": {
+                      "privateDnsZoneId": "[parameters('dnsAiServicesId')]"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints', format('pe-foundry-{0}', parameters('resourceToken')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "foundryId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.CognitiveServices/accounts', format('foundry-{0}', parameters('resourceToken')))]"
+            },
+            "foundryEndpoint": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', format('foundry-{0}', parameters('resourceToken'))), '2025-04-01-preview').endpoint]"
+            },
+            "foundryName": {
+              "type": "string",
+              "value": "[format('foundry-{0}', parameters('resourceToken'))]"
+            },
+            "projectName": {
+              "type": "string",
+              "value": "[format('project-{0}', parameters('resourceToken'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "network"
+      ]
+    },
+    "acaDns": {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "aca-dns",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "defaultDomain": {
+            "value": "[reference('containerAppsEnv').defaultDomain]"
+          },
+          "staticIp": {
+            "value": "[reference('containerAppsEnv').staticIp]"
+          },
+          "vnetId": {
+            "value": "[reference('network').outputs.vnetId.value]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "5229448320167479634"
+            }
+          },
+          "parameters": {
+            "defaultDomain": {
+              "type": "string",
+              "metadata": {
+                "description": "Default domain of the internal Container Apps environment."
+              }
+            },
+            "staticIp": {
+              "type": "string",
+              "metadata": {
+                "description": "Static IP of the internal Container Apps environment."
+              }
+            },
+            "vnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "VNet resource ID for DNS zone linking."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags to apply to all resources."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2024-06-01",
+              "name": "[parameters('defaultDomain')]",
+              "location": "global",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2024-06-01",
+              "name": "[format('{0}/{1}', parameters('defaultDomain'), 'link-aca')]",
+              "location": "global",
+              "properties": {
+                "virtualNetwork": {
+                  "id": "[parameters('vnetId')]"
+                },
+                "registrationEnabled": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', parameters('defaultDomain'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/A",
+              "apiVersion": "2024-06-01",
+              "name": "[format('{0}/{1}', parameters('defaultDomain'), '*')]",
+              "properties": {
+                "ttl": 300,
+                "aRecords": [
+                  {
+                    "ipv4Address": "[parameters('staticIp')]"
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', parameters('defaultDomain'))]"
+              ]
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "containerAppsEnv",
+        "network"
       ]
     },
     "apim": {
@@ -296,6 +904,18 @@
           },
           "modelAppFqdn": {
             "value": "[reference('modelApp').configuration.ingress.fqdn]"
+          },
+          "apimSubnetId": {
+            "value": "[reference('network').outputs.snetApimId.value]"
+          },
+          "foundryEndpoint": {
+            "value": "[reference('foundry').outputs.foundryEndpoint.value]"
+          },
+          "foundryId": {
+            "value": "[reference('foundry').outputs.foundryId.value]"
+          },
+          "foundryProjectName": {
+            "value": "[reference('foundry').outputs.projectName.value]"
           }
         },
         "template": {
@@ -306,7 +926,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "16372029354174755322"
+              "templateHash": "9664410837579059150"
             }
           },
           "parameters": {
@@ -337,9 +957,36 @@
             "modelAppFqdn": {
               "type": "string",
               "metadata": {
-                "description": "FQDN of the vLLM model container app."
+                "description": "FQDN of the vLLM model container app (internal)."
+              }
+            },
+            "apimSubnetId": {
+              "type": "string",
+              "metadata": {
+                "description": "Subnet resource ID for APIM VNet integration."
+              }
+            },
+            "foundryEndpoint": {
+              "type": "string",
+              "metadata": {
+                "description": "Foundry endpoint URL (for agent API backend)."
+              }
+            },
+            "foundryId": {
+              "type": "string",
+              "metadata": {
+                "description": "Foundry resource ID (for RBAC)."
+              }
+            },
+            "foundryProjectName": {
+              "type": "string",
+              "metadata": {
+                "description": "Foundry project name (for project-scoped agent API)."
               }
             }
+          },
+          "variables": {
+            "cognitiveServicesUserRoleId": "a97b65f3-24c7-4388-baec-2e87135dc908"
           },
           "resources": {
             "apim": {
@@ -349,13 +996,40 @@
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
               "sku": {
-                "name": "Consumption",
-                "capacity": 0
+                "name": "StandardV2",
+                "capacity": 1
+              },
+              "identity": {
+                "type": "SystemAssigned"
               },
               "properties": {
                 "publisherEmail": "[parameters('apimPublisherEmail')]",
-                "publisherName": "Foundry BYO Model"
+                "publisherName": "Foundry BYO Model",
+                "virtualNetworkType": "External",
+                "virtualNetworkConfiguration": {
+                  "subnetResourceId": "[parameters('apimSubnetId')]"
+                }
               }
+            },
+            "foundryRef": {
+              "existing": true,
+              "type": "Microsoft.CognitiveServices/accounts",
+              "apiVersion": "2025-04-01-preview",
+              "name": "[last(split(parameters('foundryId'), '/'))]"
+            },
+            "apimCogServicesRole": {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', last(split(parameters('foundryId'), '/')))]",
+              "name": "[guid(parameters('foundryId'), resourceId('Microsoft.ApiManagement/service', format('apim-{0}', parameters('resourceToken'))), variables('cognitiveServicesUserRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('cognitiveServicesUserRoleId'))]",
+                "principalId": "[reference('apim', '2024-06-01-preview', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "apim"
+              ]
             },
             "apimBackend": {
               "type": "Microsoft.ApiManagement/service/backends",
@@ -480,6 +1154,99 @@
                 "apim",
                 "apimApi"
               ]
+            },
+            "foundryBackend": {
+              "type": "Microsoft.ApiManagement/service/backends",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}', format('apim-{0}', parameters('resourceToken')), 'foundry-backend')]",
+              "properties": {
+                "description": "Azure AI Foundry backend (project-scoped)",
+                "url": "[format('{0}api/projects/{1}/openai/v1', parameters('foundryEndpoint'), parameters('foundryProjectName'))]",
+                "protocol": "http"
+              },
+              "dependsOn": [
+                "apim"
+              ]
+            },
+            "agentApi": {
+              "type": "Microsoft.ApiManagement/service/apis",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}', format('apim-{0}', parameters('resourceToken')), 'agent-api')]",
+              "properties": {
+                "displayName": "Agent API",
+                "path": "agent",
+                "protocols": [
+                  "https"
+                ],
+                "subscriptionRequired": true,
+                "subscriptionKeyParameterNames": {
+                  "header": "api-key",
+                  "query": "api-key"
+                }
+              },
+              "dependsOn": [
+                "apim"
+              ]
+            },
+            "agentOpResponses": {
+              "type": "Microsoft.ApiManagement/service/apis/operations",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}/{2}', format('apim-{0}', parameters('resourceToken')), 'agent-api', 'create-response')]",
+              "properties": {
+                "displayName": "Create Response",
+                "method": "POST",
+                "urlTemplate": "/responses"
+              },
+              "dependsOn": [
+                "agentApi"
+              ]
+            },
+            "agentOpGetResponse": {
+              "type": "Microsoft.ApiManagement/service/apis/operations",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}/{2}', format('apim-{0}', parameters('resourceToken')), 'agent-api', 'get-response')]",
+              "properties": {
+                "displayName": "Get Response",
+                "method": "GET",
+                "urlTemplate": "/responses/{response-id}",
+                "templateParameters": [
+                  {
+                    "name": "response-id",
+                    "required": true,
+                    "type": "string"
+                  }
+                ]
+              },
+              "dependsOn": [
+                "agentApi"
+              ]
+            },
+            "agentApiPolicy": {
+              "type": "Microsoft.ApiManagement/service/apis/policies",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}/{2}', format('apim-{0}', parameters('resourceToken')), 'agent-api', 'policy')]",
+              "properties": {
+                "format": "xml",
+                "value": "[format('<policies><inbound><base /><set-backend-service backend-id=\"{0}\" /><authentication-managed-identity resource=\"https://ai.azure.com\" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>', 'foundry-backend')]"
+              },
+              "dependsOn": [
+                "agentApi",
+                "foundryBackend"
+              ]
+            },
+            "agentSubscription": {
+              "type": "Microsoft.ApiManagement/service/subscriptions",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}', format('apim-{0}', parameters('resourceToken')), 'agent-api-sub')]",
+              "properties": {
+                "scope": "[resourceId('Microsoft.ApiManagement/service/apis', format('apim-{0}', parameters('resourceToken')), 'agent-api')]",
+                "displayName": "Agent API Subscription",
+                "state": "active"
+              },
+              "dependsOn": [
+                "agentApi",
+                "apim"
+              ]
             }
           },
           "outputs": {
@@ -490,43 +1257,49 @@
             "subscriptionPrimaryKey": {
               "type": "securestring",
               "value": "[listSecrets('apimSubscription', '2024-06-01-preview').primaryKey]"
+            },
+            "agentSubscriptionKey": {
+              "type": "securestring",
+              "value": "[listSecrets('agentSubscription', '2024-06-01-preview').primaryKey]"
             }
           }
         }
       },
       "dependsOn": [
-        "modelApp"
+        "foundry",
+        "modelApp",
+        "network"
       ]
     }
   },
   "outputs": {
     "foundryEndpoint": {
       "type": "string",
-      "value": "[reference('foundry').endpoint]"
+      "value": "[reference('foundry').outputs.foundryEndpoint.value]"
     },
     "foundryName": {
       "type": "string",
-      "value": "[format('foundry-{0}', variables('resourceToken'))]"
+      "value": "[reference('foundry').outputs.foundryName.value]"
     },
     "foundryProjectName": {
       "type": "string",
-      "value": "[format('project-{0}', variables('resourceToken'))]"
+      "value": "[reference('foundry').outputs.projectName.value]"
     },
     "modelAppFqdn": {
       "type": "string",
       "value": "[reference('modelApp').configuration.ingress.fqdn]"
     },
-    "containerRegistryLoginServer": {
-      "type": "string",
-      "value": "[reference('containerRegistry').loginServer]"
-    },
-    "containerRegistryName": {
-      "type": "string",
-      "value": "[toLower(replace(format('acr{0}', variables('resourceToken')), '-', ''))]"
-    },
     "apimGatewayUrl": {
       "type": "string",
       "value": "[reference('apim').outputs.gatewayUrl.value]"
+    },
+    "apimSubscriptionKey": {
+      "type": "string",
+      "value": "[listOutputsWithSecureValues('apim', '2025-04-01').subscriptionPrimaryKey]"
+    },
+    "apimAgentSubscriptionKey": {
+      "type": "string",
+      "value": "[listOutputsWithSecureValues('apim', '2025-04-01').agentSubscriptionKey]"
     },
     "gatewayConnectionName": {
       "type": "string",
@@ -548,13 +1321,9 @@
       "type": "string",
       "value": "[reference('containerAppsIdentity').clientId]"
     },
-    "AZURE_CONTAINER_REGISTRY_ENDPOINT": {
+    "agentSetupJobName": {
       "type": "string",
-      "value": "[reference('containerRegistry').loginServer]"
-    },
-    "AZURE_CONTAINER_REGISTRY_NAME": {
-      "type": "string",
-      "value": "[toLower(replace(format('acr{0}', variables('resourceToken')), '-', ''))]"
+      "value": "[format('job-agent-setup-{0}', variables('resourceToken'))]"
     }
   }
 }

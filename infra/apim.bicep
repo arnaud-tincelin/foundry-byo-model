@@ -10,11 +10,26 @@ param resourceToken string
 @description('Publisher email for APIM.')
 param apimPublisherEmail string
 
-@description('FQDN of the vLLM model container app.')
+@description('FQDN of the vLLM model container app (internal).')
 param modelAppFqdn string
 
+@description('Subnet resource ID for APIM VNet integration.')
+param apimSubnetId string
+
+@description('Foundry endpoint URL (for agent API backend).')
+param foundryEndpoint string
+
+@description('Foundry resource ID (for RBAC).')
+param foundryId string
+
+@description('Foundry project name (for project-scoped agent API).')
+param foundryProjectName string
+
+// RBAC Role Definition IDs
+var cognitiveServicesUserRoleId = 'a97b65f3-24c7-4388-baec-2e87135dc908'
+
 // ============================================================================
-// API MANAGEMENT (Internet-facing gateway)
+// API MANAGEMENT (Internet-facing gateway with VNet integration)
 // ============================================================================
 
 resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' = {
@@ -22,12 +37,34 @@ resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' = {
   location: location
   tags: tags
   sku: {
-    name: 'Consumption'
-    capacity: 0
+    name: 'StandardV2'
+    capacity: 1
+  }
+  identity: {
+    type: 'SystemAssigned'
   }
   properties: {
     publisherEmail: apimPublisherEmail
     publisherName: 'Foundry BYO Model'
+    virtualNetworkType: 'External'
+    virtualNetworkConfiguration: {
+      subnetResourceId: apimSubnetId
+    }
+  }
+}
+
+// Grant APIM managed identity Cognitive Services User on Foundry
+resource foundryRef 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' existing = {
+  name: last(split(foundryId, '/'))
+}
+
+resource apimCogServicesRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(foundryId, apim.id, cognitiveServicesUserRoleId)
+  scope: foundryRef
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cognitiveServicesUserRoleId)
+    principalId: apim.identity.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 
@@ -143,13 +180,93 @@ resource apimApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01
   }
 }
 
-// APIM subscription for the API
+// APIM subscription for the model gateway API
 resource apimSubscription 'Microsoft.ApiManagement/service/subscriptions@2024-06-01-preview' = {
   parent: apim
   name: 'model-gateway-sub'
   properties: {
     scope: apimApi.id
     displayName: 'Model Gateway Subscription'
+    state: 'active'
+  }
+}
+
+// ============================================================================
+// AGENT API (proxies Foundry Responses API via APIM)
+// ============================================================================
+
+// Backend pointing to Foundry (accessed via private endpoint from VNet)
+resource foundryBackend 'Microsoft.ApiManagement/service/backends@2024-06-01-preview' = {
+  parent: apim
+  name: 'foundry-backend'
+  properties: {
+    description: 'Azure AI Foundry backend (project-scoped)'
+    url: '${foundryEndpoint}api/projects/${foundryProjectName}/openai/v1'
+    protocol: 'http'
+  }
+}
+
+resource agentApi 'Microsoft.ApiManagement/service/apis@2024-06-01-preview' = {
+  parent: apim
+  name: 'agent-api'
+  properties: {
+    displayName: 'Agent API'
+    path: 'agent'
+    protocols: [ 'https' ]
+    subscriptionRequired: true
+    subscriptionKeyParameterNames: {
+      header: 'api-key'
+      query: 'api-key'
+    }
+  }
+}
+
+// POST /responses → Foundry POST /openai/responses
+resource agentOpResponses 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
+  parent: agentApi
+  name: 'create-response'
+  properties: {
+    displayName: 'Create Response'
+    method: 'POST'
+    urlTemplate: '/responses'
+  }
+}
+
+// GET /responses/{response-id} → Foundry GET /openai/responses/{response-id}
+resource agentOpGetResponse 'Microsoft.ApiManagement/service/apis/operations@2024-06-01-preview' = {
+  parent: agentApi
+  name: 'get-response'
+  properties: {
+    displayName: 'Get Response'
+    method: 'GET'
+    urlTemplate: '/responses/{response-id}'
+    templateParameters: [
+      {
+        name: 'response-id'
+        required: true
+        type: 'string'
+      }
+    ]
+  }
+}
+
+// API-level policy: route to Foundry backend with managed identity auth
+resource agentApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-06-01-preview' = {
+  parent: agentApi
+  name: 'policy'
+  properties: {
+    format: 'xml'
+    value: '<policies><inbound><base /><set-backend-service backend-id="${foundryBackend.name}" /><authentication-managed-identity resource="https://ai.azure.com" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+  }
+}
+
+// Subscription for the agent API
+resource agentSubscription 'Microsoft.ApiManagement/service/subscriptions@2024-06-01-preview' = {
+  parent: apim
+  name: 'agent-api-sub'
+  properties: {
+    scope: agentApi.id
+    displayName: 'Agent API Subscription'
     state: 'active'
   }
 }
@@ -162,3 +279,6 @@ output gatewayUrl string = apim.properties.gatewayUrl
 
 @secure()
 output subscriptionPrimaryKey string = apimSubscription.listSecrets().primaryKey
+
+@secure()
+output agentSubscriptionKey string = agentSubscription.listSecrets().primaryKey

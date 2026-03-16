@@ -6,22 +6,40 @@ This template deploys the full infrastructure with `azd` and registers a sample 
 
 ## Architecture
 
+All resources are deployed in a private VNet. Only APIM is exposed to the internet.
+
 ```
-┌────────────────────┐
-│  Azure AI Foundry  │
-│  (Account+Project) │
-└────────┬───────────┘
-         │ model gateway connection
-         ▼
-┌────────────────────┐
-│   Azure API Mgmt   │  ← rewrites OpenAI-compatible routes
-└────────┬───────────┘
-         │
-         ▼
-┌────────────────────┐
-│  vLLM on GPU       │  ← Container App (or any model)
-└────────────────────┘
+                    Internet
+                       │
+                       ▼
+              ┌────────────────┐
+              │  Azure APIM    │  ← Only public endpoint (Standard v2, VNet integrated)
+              │  (External)    │
+              └───────┬────────┘
+                      │ VNet
+  ┌───────────────────┼───────────────────────┐
+  │                   │                       │
+  │                   ▼                       │
+  │       ┌────────────────────┐              │
+  │       │  vLLM on GPU       │  ← Internal  │
+  │       │  (Container Apps)  │    only      │
+  │       └────────────────────┘              │
+  │                                           │
+  │       ┌────────────────────┐              │
+  │       │  Azure AI Foundry  │  ← Private   │
+  │       │  (Private Endpoint)│    endpoint  │
+  │       └────────────────────┘              │
+  └───────────────────────────────────────────┘
+                    VNet (10.0.0.0/16)
 ```
+
+### Network Layout
+
+| Subnet | CIDR | Purpose |
+|--------|------|--------|
+| `snet-apim` | `10.0.0.0/24` | APIM Standard v2 (VNet integration) |
+| `snet-aca` | `10.0.2.0/23` | Container Apps Environment (internal) |
+| `snet-pe` | `10.0.4.0/24` | Private Endpoints (Foundry) |
 
 ## Prerequisites
 
@@ -38,17 +56,22 @@ Or open in the provided **Dev Container** which includes all tools.
 # Log in
 azd auth login
 
-# Deploy everything (infra + agent registration)
+# Deploy infrastructure
 azd up
-```
 
-`azd up` provisions all resources and automatically runs the post-provision hook that registers the Foundry agent.
+# Register the agent (runs inside the VNet via Container App Job)
+az containerapp job start \
+  -n $(azd env get-value agentSetupJobName) \
+  -g <your-resource-group>
+```
 
 ### Test the agent
 
+The test script calls the agent through APIM (the only public endpoint) — no direct Foundry access needed:
+
 ```bash
-AI_SERVICES_ENDPOINT=$(azd env get-value foundryEndpoint) \
-FOUNDRY_PROJECT_NAME=$(azd env get-value foundryProjectName) \
+APIM_GATEWAY_URL=$(azd env get-value apimGatewayUrl) \
+APIM_AGENT_SUBSCRIPTION_KEY=$(azd env get-value apimAgentSubscriptionKey) \
 uv run scripts/test-agent.py
 ```
 
@@ -91,13 +114,16 @@ Pushes to `main` trigger the workflow automatically.
 
 ```
 ├── infra/
-│   ├── main.bicep          # Core resources (Foundry, Container Apps, model app)
-│   ├── apim.bicep          # API Management (gateway, routes, policies)
+│   ├── main.bicep          # Orchestrator (Container Apps, jobs, gateway connection)
+│   ├── apim.bicep          # API Management (model gateway + agent API)
+│   ├── foundry.bicep       # AI Foundry (account, project, private endpoint)
+│   ├── network.bicep       # VNet, subnets, NSGs, Private DNS zones
+│   ├── aca-dns.bicep       # Private DNS for internal Container Apps
 │   └── main.bicepparam     # Deployment parameters
 ├── scripts/
-│   ├── setup-foundry-agent.py   # Registers the prompt agent in Foundry (post-provision)
+│   ├── setup-foundry-agent.sh   # Agent registration (runs in Container App Job)
 │   ├── setup-github-deploy.sh   # OIDC setup for GitHub Actions CI/CD
-│   └── test-agent.py            # Interactive agent test client
+│   └── test-agent.py            # Interactive agent test client (via APIM)
 ├── .github/workflows/
 │   └── deploy.yml          # GitHub Actions deploy pipeline
 ├── azure.yaml              # azd project configuration

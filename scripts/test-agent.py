@@ -2,50 +2,52 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "azure-identity",
-#     "azure-ai-projects",
 #     "openai",
 # ]
 # ///
-"""Interactive conversation with the Guess My Number agent via Foundry Responses API.
+"""Interactive conversation with the Guess My Number agent via APIM gateway.
+
+The agent API is exposed through APIM, which proxies requests to Foundry
+using managed identity authentication. No Azure credentials needed — just
+the APIM subscription key.
 
 Usage:
-    export AI_SERVICES_ENDPOINT="https://<your-ai-services>.cognitiveservices.azure.com/"
-    export FOUNDRY_PROJECT_NAME="<project-name>"
+    export APIM_GATEWAY_URL="https://<your-apim>.azure-api.net"
+    export APIM_AGENT_SUBSCRIPTION_KEY="<key>"
     export GATEWAY_CONNECTION_NAME="custom-model-gateway"
-    export GATEWAY_MODEL_NAME="custom-model"
+    export GATEWAY_MODEL_NAME="my-custom-model"
     uv run scripts/test-agent.py
 """
 
 import os
 import sys
 
-from azure.identity import DefaultAzureCredential
-from azure.ai.projects import AIProjectClient
+from openai import OpenAI
 
 AGENT_NAME = "guess-my-number"
 
 
 def main():
-    endpoint = os.environ.get("AI_SERVICES_ENDPOINT")
-    if not endpoint:
-        print("Set AI_SERVICES_ENDPOINT environment variable.")
+    gateway_url = os.environ.get("APIM_GATEWAY_URL")
+    if not gateway_url:
+        print("Set APIM_GATEWAY_URL environment variable.")
         sys.exit(1)
 
-    project_name = os.environ.get("FOUNDRY_PROJECT_NAME")
-    if not project_name:
-        print("Set FOUNDRY_PROJECT_NAME environment variable.")
+    api_key = os.environ.get("APIM_AGENT_SUBSCRIPTION_KEY")
+    if not api_key:
+        print("Set APIM_AGENT_SUBSCRIPTION_KEY environment variable.")
         sys.exit(1)
-
-    project_endpoint = f"{endpoint.rstrip('/')}/api/projects/{project_name}"
 
     gateway_connection = os.environ.get("GATEWAY_CONNECTION_NAME", "custom-model-gateway")
     gateway_model = os.environ.get("GATEWAY_MODEL_NAME", "my-custom-model")
     agent_model = f"{gateway_connection}/{gateway_model}"
 
-    credential = DefaultAzureCredential()
-    project_client = AIProjectClient(endpoint=project_endpoint, credential=credential)
-    openai_client = project_client.get_openai_client()
+    # Point OpenAI client at the APIM agent API endpoint
+    client = OpenAI(
+        base_url=f"{gateway_url.rstrip('/')}/agent",
+        api_key=api_key,
+        default_headers={"api-key": api_key},
+    )
 
     agent_ref = {"agent_reference": {"name": AGENT_NAME, "type": "agent_reference"}}
 
@@ -72,7 +74,7 @@ def main():
         if previous_id:
             kwargs["previous_response_id"] = previous_id
 
-        response = openai_client.responses.create(**kwargs)
+        response = client.responses.create(**kwargs)
         previous_id = response.id
         print(f"Agent: {response.output_text}\n")
 

@@ -19,11 +19,14 @@ param apimSubnetId string
 @description('Foundry endpoint URL (for agent API backend).')
 param foundryEndpoint string
 
-@description('Foundry resource ID (for RBAC).')
-param foundryId string
+@description('Foundry account resource name.')
+param foundryResourceName string
 
 @description('Foundry project name (for project-scoped agent API).')
 param foundryProjectName string
+
+@description('The model name exposed through the gateway (used as deployment name).')
+param gatewayModelName string
 
 // RBAC Role Definition IDs
 var cognitiveServicesUserRoleId = 'a97b65f3-24c7-4388-baec-2e87135dc908'
@@ -55,11 +58,15 @@ resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' = {
 
 // Grant APIM managed identity Cognitive Services User on Foundry
 resource foundryRef 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' existing = {
-  name: last(split(foundryId, '/'))
+  name: foundryResourceName
+
+  resource project 'projects' existing = {
+    name: 'project-${resourceToken}'
+  }
 }
 
 resource apimCogServicesRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(foundryId, apim.id, cognitiveServicesUserRoleId)
+  name: guid(foundryRef.id, apim.id, cognitiveServicesUserRoleId)
   scope: foundryRef
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cognitiveServicesUserRoleId)
@@ -272,10 +279,48 @@ resource agentSubscription 'Microsoft.ApiManagement/service/subscriptions@2024-0
 }
 
 // ============================================================================
+// MODEL GATEWAY CONNECTION (register APIM as model gateway in Foundry)
+// ============================================================================
+
+// Note: we use a static list of models in this example
+// but it is also possible to have a dynamic list (requires GET /models endpoint on APIM)
+resource modelGatewayConnection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-04-01-preview' = {
+  name: 'custom-model-gateway'
+  parent: foundryRef::project
+  properties: {
+    category: 'ModelGateway'
+    target: '${apim.properties.gatewayUrl}/openai'
+    authType: 'ApiKey'
+    isSharedToAll: true
+    credentials: {
+      key: apimSubscription.listSecrets().primaryKey
+    }
+    metadata: {
+      deploymentInPath: 'true'
+      inferenceAPIVersion: ''
+      models: string([
+        {
+          name: gatewayModelName
+          properties: {
+            model: {
+              name: gatewayModelName
+              version: '1'
+              format: 'OpenAI'
+            }
+          }
+        }
+      ])
+    }
+  }
+}
+
+// ============================================================================
 // OUTPUTS
 // ============================================================================
 
 output gatewayUrl string = apim.properties.gatewayUrl
+
+output gatewayConnectionName string = modelGatewayConnection.name
 
 @secure()
 output subscriptionPrimaryKey string = apimSubscription.listSecrets().primaryKey

@@ -1,6 +1,6 @@
 # Foundry BYO Model
 
-**Bring Your Own Model** to [Azure AI Foundry](https://learn.microsoft.com/azure/ai-studio/) — serve any LLM and wire it into Foundry as a first-class [model gateway](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/ai-gateway), ready for agents.
+**Bring Your Own Model** to [Microsoft Foundry](https://learn.microsoft.com/azure/ai-studio/) — serve any LLM and wire it into Foundry as a first-class [model gateway](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/ai-gateway), ready for agents.
 
 This template deploys the full infrastructure with `azd` and registers a sample "Guess My Number" prompt agent that talks to your model.
 
@@ -9,9 +9,9 @@ This template deploys the full infrastructure with `azd` and registers a sample 
 All resources are deployed in a private VNet. Only APIM is exposed to the internet.
 
 ```
-                    Internet
-                       │
-                       ▼
+                  Internet
+                      │
+                      ▼
               ┌────────────────┐
               │  Azure APIM    │  ← Only public endpoint (Standard v2, VNet integrated)
               │  (External)    │
@@ -26,31 +26,33 @@ All resources are deployed in a private VNet. Only APIM is exposed to the intern
   │       └────────────────────┘              │
   │                                           │
   │       ┌────────────────────┐              │
-  │       │  Azure AI Foundry  │  ← Private   │
+  │       │  Microsoft Foundry │  ← Private   │
   │       │  (Private Endpoint)│    endpoint  │
   │       └────────────────────┘              │
   └───────────────────────────────────────────┘
                     VNet (10.0.0.0/16)
 ```
 
-### Network Layout
+## Deployment
 
-| Subnet | CIDR | Purpose |
-|--------|------|--------|
-| `snet-apim` | `10.0.0.0/24` | APIM Standard v2 (VNet integration) |
-| `snet-aca` | `10.0.2.0/23` | Container Apps Environment (internal) |
-| `snet-pe` | `10.0.4.0/24` | Private Endpoints (Foundry) |
+⚠️ Because the Foundry project is private, the configuration of the agent is done from a Container App Job within the VNet. This is a "hack" to avoid deploying a jumpbox or a VPN. The job is triggered automatically after provisioning via an `azd` postprovision hook.
 
-## Prerequisites
+You can check the log of the job to verify if the agent was created successfuly from the Azure portal. If so, you should see a similar log:
+
+> Agent created: guess-my-number v4 model=custom-model-gateway/my-custom-model
+
+### Prerequisites
+
+Recommended: open in the provided **Dev Container** which includes all tools
+
+Or, install the following tools locally:
 
 - [Azure Developer CLI (`azd`)](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd)
 - [Azure CLI (`az`)](https://learn.microsoft.com/cli/azure/install-azure-cli)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - An Azure subscription with GPU quota
 
-Or open in the provided **Dev Container** which includes all tools.
-
-## Quick Start
+### Quick Start
 
 ```bash
 # Log in
@@ -58,11 +60,6 @@ azd auth login
 
 # Deploy infrastructure
 azd up
-
-# Register the agent (runs inside the VNet via Container App Job)
-az containerapp job start \
-  -n $(azd env get-value agentSetupJobName) \
-  -g <your-resource-group>
 ```
 
 ### Test the agent
@@ -75,19 +72,7 @@ APIM_AGENT_SUBSCRIPTION_KEY=$(azd env get-value apimAgentSubscriptionKey) \
 uv run scripts/test-agent.py
 ```
 
-## Bring Your Own Model
-
-Configure the deployment via `infra/main.bicepparam`:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `environmentName` | `production` | Environment name used for resource naming |
-| `location` | `swedencentral` | Azure region |
-| `apimPublisherEmail` | `admin@contoso.com` | APIM publisher email |
-
-Then re-run `azd up`.
-
-## CI/CD with GitHub Actions
+## Optional: CI/CD with GitHub Actions
 
 A deploy workflow is provided at `.github/workflows/deploy.yml` using OIDC federated credentials.
 
@@ -109,23 +94,3 @@ The script prints the secrets to configure under **GitHub → Settings → Envir
 | `APIM_PUBLISHER_EMAIL` | Email for API Management |
 
 Pushes to `main` trigger the workflow automatically.
-
-## Project Structure
-
-```
-├── infra/
-│   ├── main.bicep          # Orchestrator (Container Apps, jobs, gateway connection)
-│   ├── apim.bicep          # API Management (model gateway + agent API)
-│   ├── foundry.bicep       # AI Foundry (account, project, private endpoint)
-│   ├── network.bicep       # VNet, subnets, NSGs, Private DNS zones
-│   ├── aca-dns.bicep       # Private DNS for internal Container Apps
-│   └── main.bicepparam     # Deployment parameters
-├── scripts/
-│   ├── setup-foundry-agent.sh   # Agent registration (runs in Container App Job)
-│   ├── setup-github-deploy.sh   # OIDC setup for GitHub Actions CI/CD
-│   └── test-agent.py            # Interactive agent test client (via APIM)
-├── .github/workflows/
-│   └── deploy.yml          # GitHub Actions deploy pipeline
-├── azure.yaml              # azd project configuration
-└── README.md
-```

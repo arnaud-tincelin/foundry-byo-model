@@ -3,3 +3,12 @@ name: foundry-byo-model
 infra:
   provider: bicep
   path: infra
+
+hooks:
+  postprovision:
+    shell: sh
+    run: |
+      # Register the agent (runs inside the VNet via Container App Job)
+      az containerapp job start \
+        -n $(azd env get-value agentSetupJobName) \
+        -g $(azd env get-value AZURE_RESOURCE_GROUP_NAME)

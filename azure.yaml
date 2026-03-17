@@ -11,4 +11,4 @@ hooks:
       # Register the agent (runs inside the VNet via Container App Job)
       az containerapp job start \
         -n $(azd env get-value agentSetupJobName) \
-        -g $(azd env get-value AZURE_RESOURCE_GROUP_NAME)
+        -g $(azd env get-value AZURE_RESOURCE_GROUP)
